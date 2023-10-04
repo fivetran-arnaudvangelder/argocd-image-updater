@@ -67,6 +67,7 @@ type WriteBackConfig struct {
 	GitCommitEmail   string
 	GitCommitMessage string
 	KustomizeBase    string
+	HelmBase         string
 	Target           string
 }
 
@@ -438,6 +439,9 @@ func getWriteBackConfig(app *v1alpha1.Application, kubeClient *kube.KubernetesCl
 		if target, ok := app.Annotations[common.WriteBackTargetAnnotation]; ok && strings.HasPrefix(target, common.KustomizationPrefix) {
 			wbc.KustomizeBase = parseTarget(target, app.Spec.Source.Path)
 		}
+		if target, ok := app.Annotations[common.WriteBackTargetAnnotation]; ok && strings.HasPrefix(target, common.HelmPrefix) {
+			wbc.HelmBase = parseHelmTarget(target, app.Spec.Source.Path)
+		}
 		if err := parseGitConfig(app, kubeClient, wbc, creds); err != nil {
 			return nil, err
 		}
@@ -458,6 +462,17 @@ func parseTarget(target string, sourcePath string) (kustomizeBase string) {
 	if target == common.KustomizationPrefix {
 		return filepath.Join(sourcePath, ".")
 	} else if base := target[len(common.KustomizationPrefix)+1:]; strings.HasPrefix(base, "/") {
+		return base[1:]
+	} else {
+		return filepath.Join(sourcePath, base)
+	}
+}
+
+// parseHelmTarget is a temporary function to avoid slice-out-of-bounds errors when common.KustomizationPrefix isn't set
+func parseHelmTarget(target string, sourcePath string) (kustomizeBase string) {
+	if target == common.HelmPrefix {
+		return filepath.Join(sourcePath, common.DefaultHelmTargetFile)
+	} else if base := target[len(common.HelmPrefix)+1:]; strings.HasPrefix(base, "/") {
 		return base[1:]
 	} else {
 		return filepath.Join(sourcePath, base)
@@ -510,6 +525,8 @@ func commitChanges(app *v1alpha1.Application, wbc *WriteBackConfig, changeList [
 		// if the kustomize base is set, the target is a kustomization
 		if wbc.KustomizeBase != "" {
 			return commitChangesGit(app, wbc, changeList, writeKustomization)
+		} else if wbc.HelmBase != "" {
+			return commitChangesGit(app, wbc, changeList, writeHelm)
 		}
 		return commitChangesGit(app, wbc, changeList, writeOverrides)
 	default:
